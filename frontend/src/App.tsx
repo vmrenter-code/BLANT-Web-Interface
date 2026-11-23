@@ -8,6 +8,7 @@ import LandingPage from './pages/LandingPage';
 import NotFound from './pages/NotFound';
 import SubmitJob from './pages/SubmitJob';
 import BasicBlantRun from './pages/BasicBlantRun';
+import NetworkSynthesis from './pages/NetworkSynthesis';
 import LookupJob from './pages/LookupJob';
 import ContactUs from './pages/ContactUs';
 import AboutPage from './pages/About';
@@ -26,6 +27,7 @@ function App() {
               <Route path="*" element={<NotFound />} />
               <Route path="/submit-job" element={<SubmitJob />} />
               <Route path="/basic-blant-run" element={<BasicBlantRun />} />
+              <Route path="/network-synthesis" element={<NetworkSynthesis />} />
               <Route path="/lookup-job/:id?" element={<LookupJob />} />
               <Route path="/contact-us" element={<ContactUs />} />
               <Route path="/about" element={<AboutPage />} />

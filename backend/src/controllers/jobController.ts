@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { Response, NextFunction } from 'express';
 import HttpError from '../middlewares/HttpError';
-import { createJob, createBasicBlantRunJob } from '../services/jobService';
+import { createJob, createBasicBlantRunJob, createNetworkSynthesisJob } from '../services/jobService';
 import { cleanupFile } from '../middlewares/upload';
 import { jobProcess } from '../services/processService';
 import {
@@ -17,6 +17,7 @@ import {
     SubmitJobOptions,
     SubmitJobRequest,
     SubmitBasicBlantRunRequest,
+    SubmitNetworkSynthesisRequest,
     UnifiedResponse,
     BASIC_BLANT_RUN_K_MIN,
     BASIC_BLANT_RUN_K_MAX,
@@ -33,54 +34,43 @@ import { getJobFromQueue, getWaitingCount } from '../config/queue';
 const downloadZipJob = async (req: DownloadZipRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
         const jobId = req.params.id;
-        if (!jobId) {
-            throw new HttpError('Job ID is required.', { status: 400 });
+        // Job IDs are 32-character md5 hex strings made by the server; anything else could point outside ./process.
+        if (!jobId || !/^[a-f0-9]{32}$/.test(jobId)) {
+            throw HttpError.badRequest('Invalid job ID.');
         }
 
-        const jobDir = path.join(__dirname, '../process', jobId);
-        const infoFilePath = path.join(jobDir, 'info.json');
-
-        // Check if job directory exists
+        // Same folder the workers write to.
+        const jobDir = path.resolve('./process', jobId);
         if (!fs.existsSync(jobDir) || !fs.lstatSync(jobDir).isDirectory()) {
             throw new HttpError('Job not found.', { status: 404 });
         }
 
-        // Check if info.json exists
-        if (!fs.existsSync(infoFilePath)) {
-            throw new HttpError('Job data not found. The job might not have been processed yet.', {
-                status: 500,
-            });
+        // The worker records the zip name in the queue and in info.json once the zip is written.
+        const job = await getJobFromQueue(jobId);
+        let zipName: string | undefined = job?.data.zipName;
+        if (!zipName) {
+            try {
+                const info = JSON.parse(fs.readFileSync(path.join(jobDir, 'info.json'), 'utf8'));
+                zipName = info.zipName;
+            } catch (err) {
+                console.error(`Could not read info.json for job ${jobId}:`, err);
+            }
+        }
+        if (!zipName) {
+            throw new HttpError('The results zip is not ready yet. Please wait for the job to finish.', { status: 404 });
         }
 
-        // Read job data
-        try {
-            const infoJsonContent = fs.readFileSync(infoFilePath, 'utf8');
-            const jobData = JSON.parse(infoJsonContent);
-
-            if (!jobData.zipName) {
-                throw new HttpError('Invalid job data: missing zip file name.', {
-                    status: 500,
-                });
-            }
-
-            const zipLocation = path.join(jobDir, jobData.zipName);
-
-            if (!fs.existsSync(zipLocation)) {
-                throw new HttpError('Zip file not found.', { status: 404 });
-            }
-
-            // Send the zip file
-            res.download(zipLocation, jobData.zipName, (err) => {
-                if (err) {
-                    console.error('Error sending zip file:', err);
-                    // log the error and let the download fail gracefully
-                }
-            });
-
-        } catch (error) {
-            console.error('Error reading job data:', error);
-            throw new HttpError('Could not read job data.', { status: 500 });
+        const zipLocation = path.join(jobDir, path.basename(zipName));
+        if (!fs.existsSync(zipLocation)) {
+            throw new HttpError('Zip file not found.', { status: 404 });
         }
+
+        res.download(zipLocation, path.basename(zipName), (err) => {
+            if (err) {
+                // headers may already be sent; just log and let the download fail
+                console.error('Error sending zip file:', err);
+            }
+        });
     } catch (err) {
         next(err);
     }
@@ -92,7 +82,10 @@ const _isValidEmail = (email: string): boolean => {
 }
 
 
-const _validateSubmitJob = (jobOptions: SubmitJobOptions, req: SubmitJobRequest): void => {
+const _validateCommunityDetectionOptions = (jobOptions: SubmitJobOptions): void => {
+    if (!jobOptions || typeof jobOptions !== 'object') {
+        throw HttpError.badRequest('Community detection options are required.');
+    }
     if (!jobOptions.density) {
         throw HttpError.badRequest('density is required.');
     }
@@ -120,6 +113,10 @@ const _validateSubmitJob = (jobOptions: SubmitJobOptions, req: SubmitJobRequest)
     } else if (jobOptions.graphletSize > 7 || jobOptions.graphletSize < 3) {
         throw HttpError.badRequest('graphletSize must be between 3 and 7.');
     }
+};
+
+const _validateSubmitJob = (jobOptions: SubmitJobOptions, req: SubmitJobRequest): void => {
+    _validateCommunityDetectionOptions(jobOptions);
 
     if (req.body.email && !_isValidEmail(req.body.email)) {
         throw HttpError.badRequest('Invalid email address.');
@@ -205,6 +202,48 @@ const submitBasicBlantRunController = async (req: SubmitBasicBlantRunRequest, re
     }
 };
 
+/**
+ * Controller for the Network Synthesis tool.
+ * Expects multipart form data with `file` (.el network), `runCommunityDetection` ("true"/"false")
+ * and, when community detection is on, `options` (JSON: density, graphletSize, fractionalOverlap).
+ */
+const submitNetworkSynthesisController = async (req: SubmitNetworkSynthesisRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        if (!req.file) {
+            throw HttpError.badRequest('No network file uploaded.');
+        }
+        const runCommunityDetection = req.body.runCommunityDetection === 'true';
+        let communityDetection: { density: number; graphletSize: number; fractionalOverlap: number } | null = null;
+        if (runCommunityDetection) {
+            let raw: any;
+            try {
+                raw = JSON.parse(req.body.options ?? '');
+            } catch {
+                throw HttpError.badRequest('Community detection options must be valid JSON.');
+            }
+            const options: SubmitJobOptions = {
+                density: Number(raw?.density),
+                graphletSize: Number(raw?.graphletSize),
+                fractionalOverlap: Number(raw?.fractionalOverlap),
+            };
+            _validateCommunityDetectionOptions(options);
+            if (!Number.isInteger(options.graphletSize)) {
+                throw HttpError.badRequest('graphletSize must be a whole number.');
+            }
+            communityDetection = options;
+        }
+        const jobData = await createNetworkSynthesisJob(req.file, communityDetection);
+        const processResult = await processController(jobData);
+        res.status(201).json(processResult);
+    } catch (err) {
+        // On a validation error the upload is still in tmp/; remove it.
+        if (err instanceof HttpError && err.statusCode === 400) {
+            cleanupFile(req.file);
+        }
+        next(err);
+    }
+};
+
 // Controller to process a job after submission.
 const processController = async (data: JobData): Promise<ProcessJobData> => {
     const jobId = data.id;
@@ -265,6 +304,35 @@ const getJobStatus = async (req: GetJobResultsRequest, res: Response, next: Next
                 tool: 'basicBlantRun',
                 execLogFileOutput: _readJobFile(jobDir, 'blant_runtime.log') ?? job.data.execLogFileOutput,
                 resultsOutput: separatedResults ?? '',
+            });
+            return;
+        }
+
+        // Network Synthesis: progress log, communities preview and whether the zip is ready.
+        if (job.data.tool === 'networkSynthesis') {
+            const progressLog = _readJobFile(jobDir, 'blant_runtime.log') ?? job.data.execLogFileOutput ?? '';
+            const communitiesOutput = _readJobFile(jobDir, 'communities.txt') ?? job.data.resultsOutput ?? '';
+            if (status === 'failed') {
+                const message = 'The job stopped with an error. See the progress log below.';
+                res.status(400).json({
+                    status: 'error',
+                    message,
+                    error: { message },
+                    tool: 'networkSynthesis',
+                    execLogFileOutput: progressLog,
+                    resultsOutput: communitiesOutput,
+                    zipReady: false,
+                });
+                return;
+            }
+            res.status(200).json({
+                status: status === 'completed' ? 'success' : status === 'waiting' ? 'waiting' : 'processing',
+                message: status === 'completed' ? 'Job Results' : `Job Status is ${status}.`,
+                redirect: `/lookup-job/${jobId}`,
+                tool: 'networkSynthesis',
+                execLogFileOutput: progressLog,
+                resultsOutput: communitiesOutput,
+                zipReady: status === 'completed' && Boolean(job.data.zipName),
             });
             return;
         }
@@ -427,6 +495,7 @@ export {
     getJobStatus,
     submitJobController, 
     submitBasicBlantRunController,
+    submitNetworkSynthesisController,
     processController,
     cancelJob,
 };

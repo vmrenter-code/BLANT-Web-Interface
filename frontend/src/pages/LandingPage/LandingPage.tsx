@@ -38,6 +38,7 @@ const LandingPage: React.FC = () => {
             in our <a href="https://www.liebertpub.com/doi/abs/10.1089/cmb.2025.0095" target="_blank" rel="noopener noreferrer" aria-label="Community detection paper (opens in new tab)">paper</a>
           </li>
           <li> <a href="/blant/basic-blant-run" aria-label="Basic BLANT Run tool">Basic BLANT Run</a>: run <code>blant -k</code> on your own network </li>
+          <li> <a href="/blant/network-synthesis" aria-label="Graphlet-Based Network Synthesis tool">Graphlet-Based Network Synthesis</a>: run community detection on your network and download the results as a zip (network synthesis coming soon) </li>
           <li> Other BLANT-based tools will become available soon </li>
         </ul>
         <p>

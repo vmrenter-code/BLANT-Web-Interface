@@ -53,6 +53,15 @@ export interface SubmitBasicBlantRunRequest extends Request {
     };
 }
 
+// Network Synthesis: multipart form with `file`, `runCommunityDetection` ("true"/"false")
+// and, when community detection is on, `options` (same JSON as SubmitJobOptions).
+export interface SubmitNetworkSynthesisRequest extends Request {
+    body: {
+        runCommunityDetection?: string;
+        options?: string;
+    };
+}
+
 export interface SubmitJobOptions {
     density: number,
     graphletSize: number,
@@ -96,6 +105,7 @@ export interface UnifiedResponse<T = undefined, E = undefined> {
     // Basic BLANT Run only: blant's results (stdout), kept separate from the progress log above.
     tool?: JobTool;
     resultsOutput?: string;
+    zipReady?: boolean;
     data?: T;
     error?: ErrorDetails<E>;
     redirect?: string;
@@ -108,7 +118,7 @@ export type JobMode = 'f' | 'o' | 'g' | 'i' | 'j' ;
 
 // Which web tool a job belongs to. Jobs queued before this field existed have no
 // `tool` and are treated as community detection.
-export type JobTool = 'communityDetection' | 'basicBlantRun';
+export type JobTool = 'communityDetection' | 'basicBlantRun' | 'networkSynthesis';
 
 // Allowed values of k for the Basic BLANT Run tool (`./blant -k <k> network.el`).
 // Checked on the server in the controller and again in the worker.
@@ -128,6 +138,9 @@ export type JobData = {
     fractionalOverlap?: number;
     // basic BLANT run options
     k?: number;
+    // network synthesis options (uses the community detection options above when on)
+    runCommunityDetection?: boolean;
+    zipName?: string;           // set by the worker once the results zip is written
     // file info
     networkName: string;
     extension: string;
@@ -139,7 +152,7 @@ export type JobData = {
     error?: string;
     // outputs
     execLogFileOutput: string;  // for Basic BLANT Run: progress messages (stderr) only
-    resultsOutput?: string;     // Basic BLANT Run only: results (stdout)
+    resultsOutput?: string;     // Basic BLANT Run: results (stdout); Network Synthesis: communities (stdout)
     // timestamps (as ISO strings for JSON serialization)
     createdAt: string;
     updatedAt: string;
@@ -214,6 +227,7 @@ export interface ProcessedJobResponse {
     execLogFileOutput: string;
     tool?: JobTool;
     resultsOutput?: string;
+    zipReady?: boolean;         // Network Synthesis only
 };
 
 // AUTH TYPES

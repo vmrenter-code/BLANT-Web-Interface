@@ -92,6 +92,14 @@ export class ApiError extends Error {
   }
 }
 
+/** What the server sends back after a job is submitted. */
+export interface SubmitJobResult {
+  redirect?: string;
+  message?: string;
+  status?: string;
+  error?: { message?: string };
+}
+
 /**
  * API interface with strongly typed methods
  */
@@ -101,6 +109,7 @@ interface Api {
 //   process: (jobId: string) => Promise<ProcessJobResponse>;
   submitJob: (formData: FormData) => Promise<any>;
   submitBasicBlantRun: (formData: FormData) => Promise<any>;
+  submitNetworkSynthesis: (formData: FormData) => Promise<SubmitJobResult>;
   getJobStatus: (
     jobId: string
   ) => Promise<any>;
@@ -161,6 +170,21 @@ const api: Api = {
       return await response.json();
     } catch (error: any) {
       console.error("submitBasicBlantRun error:", error);
+      throw new ApiError("Failed to submit job, something went wrong", 500);
+    }
+  },
+
+  // Network Synthesis: formData must contain `file` (.el network), `runCommunityDetection`
+  // ("true"/"false") and, when it is "true", `options` (JSON: graphletSize, density, fractionalOverlap).
+  submitNetworkSynthesis: async (formData: FormData): Promise<SubmitJobResult> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/submitNetworkSynthesis`, {
+        method: "POST",
+        body: formData,
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("submitNetworkSynthesis error:", error);
       throw new ApiError("Failed to submit job, something went wrong", 500);
     }
   },

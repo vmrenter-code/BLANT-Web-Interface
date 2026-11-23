@@ -9,6 +9,8 @@ import {
     getJobStatus,
     submitJobController,
     submitBasicBlantRunController,
+    submitNetworkSynthesisController,
+    downloadZipJob,
     cancelJob,
 } from '../controllers/jobController';
 
@@ -39,6 +41,18 @@ router.post(
     submitBasicBlantRunController,
 );
 
+// Network Synthesis: optional community detection on the uploaded network, then a results zip.
+// Same upload rules as the other tools (.el only, 5 MB, one file).
+router.post(
+    '/submitNetworkSynthesis',
+    uploadMiddleware,
+    validateSingleFileMiddleware,
+    submitNetworkSynthesisController,
+);
+
+// Download a job's results zip (used by Network Synthesis).
+router.get('/:id/zip', downloadZipJob);
+
 router.post(
     '/cancelJob/:id',
     cancelJob,
@@ -49,7 +63,6 @@ router.get('/status/:id', getJobStatus);
 // router.get('/cancelJob/:id', cancelJobController);
 
 // Future endpoints
-// router.get('/:id/zip', downloadZipJob);
 // router.get('/:id', getJobResults);
 // router.get('/api/jobs', lookupJobsController); <-- for admin page in future
 

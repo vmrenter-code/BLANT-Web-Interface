@@ -6,12 +6,22 @@ import './LookupJob.css';
 import api from '../../api/api';
 import LoadingCircle from '../../components/LoadingCircle';
 import BasicBlantRunOutput, { type BasicBlantRunState } from '../../components/BasicBlantRunOutput';
+import NetworkSynthesisOutput, { type NetworkSynthesisState } from '../../components/NetworkSynthesisOutput';
 
 // Output of a Basic BLANT Run job (results and progress are shown separately).
 interface BasicBlantRunView {
   state: BasicBlantRunState;
   results: string;
   progress: string;
+  failureMessage?: string;
+}
+
+// Output of a Network Synthesis job (communities, progress, and whether the zip can be downloaded).
+interface NetworkSynthesisView {
+  state: NetworkSynthesisState;
+  communities: string;
+  progress: string;
+  zipReady: boolean;
   failureMessage?: string;
 }
 
@@ -25,6 +35,7 @@ const LookupJob: React.FC = () => {
   const navigate = useNavigate();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const [basicBlantRun, setBasicBlantRun] = useState<BasicBlantRunView | null>(null);
+  const [networkSynthesis, setNetworkSynthesis] = useState<NetworkSynthesisView | null>(null);
 
   const stopPolling = () => {
     if (intervalRef.current) {
@@ -41,6 +52,22 @@ const LookupJob: React.FC = () => {
 
     // Basic BLANT Run jobs: show results and progress separately.
     const tool = result.tool ?? result.data?.tool;
+    if (tool === 'networkSynthesis') {
+      const state: NetworkSynthesisState =
+        result.status === 'success' ? 'done' : result.status === 'error' ? 'failed' : 'running';
+      setNetworkSynthesis({
+        state,
+        communities: result.resultsOutput ?? '',
+        progress: result.execLogFileOutput ?? '',
+        zipReady: Boolean(result.zipReady),
+        failureMessage: state === 'failed' ? result.message : undefined,
+      });
+      if (state !== 'running') {
+        setResponseComplete(true);
+        stopPolling();
+      }
+      return;
+    }
     if (tool === 'basicBlantRun') {
       if (result.status === 'success') {
         setBasicBlantRun({
@@ -94,6 +121,7 @@ const LookupJob: React.FC = () => {
   useEffect(() => {
     console.log('useEffect id:', id);
     setBasicBlantRun(null);
+    setNetworkSynthesis(null);
     if (id) {
       setJobId(id);
       getJobStatus(id);
@@ -125,7 +153,7 @@ const LookupJob: React.FC = () => {
     const result = await api.getJobStatus(searchJobId);
 
     // A failed Basic BLANT Run still exists, so open it to show its progress log.
-    if (result.status === 'error' && result.tool !== 'basicBlantRun') {
+    if (result.status === 'error' && result.tool !== 'basicBlantRun' && result.tool !== 'networkSynthesis') {
       alert(result.error.message);
     } else { // only go to /lookup-job/[jobId] if the job exists
       setJobId(() => searchJobId);
@@ -150,6 +178,22 @@ const LookupJob: React.FC = () => {
       alert(result.error.message);
     }
   };
+
+  if (networkSynthesis && jobId) {
+    return (
+      <div className="lj-pageContainer">
+        <NetworkSynthesisOutput
+          jobId={jobId}
+          state={networkSynthesis.state}
+          communities={networkSynthesis.communities}
+          progress={networkSynthesis.progress}
+          zipReady={networkSynthesis.zipReady}
+          failureMessage={networkSynthesis.failureMessage}
+          onCancel={networkSynthesis.state === 'running' ? handleCancelJob : undefined}
+        />
+      </div>
+    );
+  }
 
   if (basicBlantRun && jobId) {
     return (

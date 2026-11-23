@@ -126,4 +126,52 @@ const createBasicBlantRunJob = async (file: MulterFile, k: number): Promise<JobD
     }
 };
 
-export { createJob, createBasicBlantRunJob };
+/**
+ * Creates a Network Synthesis job.
+ * For now the synthesis step is a placeholder (SynthNetGen is still being finished): the worker
+ * optionally runs community detection on the uploaded network and zips the network + communities.
+ * `communityDetection` must already be validated by the controller (null = don't run it).
+ */
+const createNetworkSynthesisJob = async (
+    file: MulterFile,
+    communityDetection: { density: number; graphletSize: number; fractionalOverlap: number } | null,
+): Promise<JobData> => {
+    const networkFullName = file.originalname;
+    const networkName = networkFullName.substring(0, networkFullName.lastIndexOf('.'));
+    const extension = path.extname(file.originalname).toLowerCase();
+    const jobId = createHash('md5')
+        .update(`${Date.now()}-${networkName}-${randomBytes(8).toString('hex')}`)
+        .digest('hex');
+
+    _validateCreateJob(file, networkFullName, extension);
+
+    const jobData: JobData = {
+        id: jobId,
+        status: 'preprocessing',
+        tool: 'networkSynthesis',
+        runCommunityDetection: communityDetection !== null,
+        ...(communityDetection ?? {}),
+        jobLocation: `./process/${jobId}`,
+        extension,
+        networkName,
+        email: null,
+        attempts: 0,
+        execLogFileOutput: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+
+    try {
+        await preprocess(file, jobData);
+        // Run once: a failure (bad network, timeout) won't be fixed by retrying.
+        await addJobToQueue(jobId, jobData, { attempts: 1 });
+        return jobData;
+    } catch (error: any) {
+        throw new HttpError(
+            `Error during preprocessing: ${error.message}`,
+            { status: 500, errorLog: error.stack }
+        );
+    }
+};
+
+export { createJob, createBasicBlantRunJob, createNetworkSynthesisJob };

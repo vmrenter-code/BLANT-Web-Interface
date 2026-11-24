@@ -13,7 +13,10 @@ import api from '../../api/api';
 const K_MIN = 3;
 const K_MAX = 7;
 const K_DEFAULT = 4;
-const K_VALUES = Array.from({ length: K_MAX - K_MIN + 1 }, (_, i) => K_MIN + i);
+// When the option checkbox under the file picker is checked, k is capped at this value.
+// The backend accepts 3..7, so it needs no change for this cap.
+const K_MAX_WHEN_CHECKED = 5;
+const kValuesUpTo = (max: number) => Array.from({ length: max - K_MIN + 1 }, (_, i) => K_MIN + i);
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // matches the backend upload limit
 
 const validateFile = (file: File): string | null => {
@@ -34,6 +37,16 @@ const BasicBlantRun: React.FC = () => {
   const [networkFile, setNetworkFile] = useState<File | null>(null);
   const [k, setK] = useState<number>(K_DEFAULT);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  // TODO: rename once the professor says what this option is for.
+  const [limitK, setLimitK] = useState<boolean>(false);
+  const kMax = limitK ? K_MAX_WHEN_CHECKED : K_MAX;
+  const kValues = kValuesUpTo(kMax);
+
+  const handleLimitKChange = (checked: boolean) => {
+    setLimitK(checked);
+    // Checking the box sets k to the cap (5).
+    if (checked) setK(K_MAX_WHEN_CHECKED);
+  };
 
   const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>): Promise<boolean> => {
     const file = event.target.files?.[0];
@@ -84,6 +97,25 @@ const BasicBlantRun: React.FC = () => {
           <NetworkSelection onDataChange={handleFileInputChange} />
 
           <div className="os-stepContainer">
+            {/* PLACEHOLDER label/description: replace once the professor confirms the wording. */}
+            <label htmlFor="blantLimitK" className="os-labelWithInfo">
+              <input
+                type="checkbox"
+                id="blantLimitK"
+                checked={limitK}
+                onChange={(e) => handleLimitKChange(e.target.checked)}
+                aria-describedby="blant-limit-k-description"
+                style={{ marginRight: '0.5rem' }}
+              />
+              [Placeholder option label]
+            </label>
+            <p id="blant-limit-k-description">
+              [Placeholder description: explain what this option does.] When checked, the largest
+              graphlet size you can pick is {K_MAX_WHEN_CHECKED}.
+            </p>
+          </div>
+
+          <div className="os-stepContainer">
             <div className="os-optionsGrid">
               <div className="os-inputGroup">
                 <label htmlFor="blantK" className="os-labelWithInfo">
@@ -96,12 +128,12 @@ const BasicBlantRun: React.FC = () => {
                   onChange={(e) => setK(Number(e.target.value))}
                   aria-describedby="blant-k-description"
                 >
-                  {K_VALUES.map((value) => (
+                  {kValues.map((value) => (
                     <option key={value} value={value}>{value}</option>
                   ))}
                 </select>
                 <span id="blant-k-description" className="sr-only">
-                  Number of nodes in the graphlets BLANT samples, between {K_MIN} and {K_MAX}
+                  Number of nodes in the graphlets BLANT samples, between {K_MIN} and {kMax}
                 </span>
               </div>
             </div>
